@@ -9,6 +9,8 @@ export type ConfigData = {
   model_id: string | null;
   omdb_api_key: string | null;
   base_url: string | null;
+  vision_model: string | null;
+  vision_base_url: string | null;
   configured: boolean;
 };
 
@@ -24,9 +26,11 @@ export type MessageSetter = Dispatch<SetStateAction<Message[]>>;
 
 const defaultConfig: ConfigData = {
   openai_api_key: null,
-  model_id: 'gpt-5.4-nano',
+  model_id: 'liang',
   omdb_api_key: null,
   base_url: null,
+  vision_model: null,
+  vision_base_url: null,
   configured: false,
 };
 

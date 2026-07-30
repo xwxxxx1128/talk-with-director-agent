@@ -10,8 +10,10 @@ type KeyConfigProps = {
 export default function KeyConfig({ config, onConfigChange }: KeyConfigProps) {
   const [openaiKey, setOpenaiKey] = useState('');
   const [omdbKey, setOmdbKey] = useState('');
-  const [modelId, setModelId] = useState(config.model_id || 'gpt-5.4-nano');
+  const [modelId, setModelId] = useState(config.model_id || 'liang');
   const [baseUrl, setBaseUrl] = useState(config.base_url || '');
+  const [visionModel, setVisionModel] = useState(config.vision_model || '');
+  const [visionBaseUrl, setVisionBaseUrl] = useState(config.vision_base_url || '');
   const [status, setStatus] = useState('');
 
   const handleSave = async () => {
@@ -21,6 +23,8 @@ export default function KeyConfig({ config, onConfigChange }: KeyConfigProps) {
       model_id: modelId,
       omdb_api_key: omdbKey || config.omdb_api_key,
       base_url: baseUrl,
+      vision_model: visionModel,
+      vision_base_url: visionBaseUrl,
     };
     const res = await fetch('/api/config', {
       method: 'POST',
@@ -112,6 +116,41 @@ export default function KeyConfig({ config, onConfigChange }: KeyConfigProps) {
             }}
           />
         </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField
+            fullWidth
+            label="视觉模型（图片描述用）"
+            value={visionModel}
+            onChange={(e) => setVisionModel(e.target.value)}
+            placeholder="如 qwen2.5-vl-7b / gpt-4o-mini"
+            helperText="图片分析第一步：把画面转成文字描述，再交给 liang"
+            InputLabelProps={{ shrink: true }}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                '& fieldset': { borderColor: 'rgba(15, 23, 42, 0.23)' },
+                '&:hover fieldset': { borderColor: '#3b82f6' },
+                '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+              },
+            }}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField
+            fullWidth
+            label="视觉模型 API 地址"
+            value={visionBaseUrl}
+            onChange={(e) => setVisionBaseUrl(e.target.value)}
+            placeholder="留空则复用上方中转站"
+            InputLabelProps={{ shrink: true }}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                '& fieldset': { borderColor: 'rgba(15, 23, 42, 0.23)' },
+                '&:hover fieldset': { borderColor: '#3b82f6' },
+                '&.Mui-focused fieldset': { borderColor: '#3b82f6' },
+              },
+            }}
+          />
+        </Grid>
       </Grid>
 
       <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
@@ -136,6 +175,12 @@ export default function KeyConfig({ config, onConfigChange }: KeyConfigProps) {
         </Typography>
         <Typography variant="body2" sx={{ color: '#111827' }}>
           API 中转站: {config.base_url || '默认'}
+        </Typography>
+        <Typography variant="body2" sx={{ color: '#111827' }}>
+          视觉模型: {config.vision_model || '未配置（图片分析将不可用）'}
+        </Typography>
+        <Typography variant="body2" sx={{ color: '#111827' }}>
+          视觉模型地址: {config.vision_base_url || '复用中转站'}
         </Typography>
       </Box>
     </Box>

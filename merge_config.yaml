@@ -1,0 +1,18 @@
+### model
+# 基座权重（云上已存在，来自 adapter_config.json 的 base_model_name_or_path）
+model_name_or_path: /mnt/workspace/models/models/Qwen--Qwen2.5-7B-Instruct/snapshots/master
+# 你的 LoRA 适配器（云上 checkpoint-40 的路径）
+adapter_name_or_path: /home/user/checkpoint-40
+# Qwen2.5 用 qwen2.5；注意不是 qwen3_nothink（那是 Qwen3 才用）
+template: qwen2.5
+trust_remote_code: true
+
+### export
+# 合并后模型的输出目录
+export_dir: /home/user/qwen2.5-7b-liang
+# 每个分片最大 5GB（7B 全精度约 14~15GB，会切成 3 片）。不需要分片可删除此行
+export_size: 5
+# 在 CPU 上合并，不占 GPU（7B 合并需要约 15GB+ 内存，云机通常够）。想更快可改 cuda
+export_device: cpu
+# 输出 safetensors 新格式
+export_legacy_format: false

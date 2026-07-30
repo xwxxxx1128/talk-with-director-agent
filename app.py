@@ -21,6 +21,7 @@ from agno.skills import Skills
 from agno.skills.loaders.local import LocalSkills
 from agno.tools.toolkit import Toolkit
 from image_utils import create_agno_png_image
+from rag_retriever import LiAngRAG
 import requests
 import json
 import shutil
@@ -226,13 +227,13 @@ def _load_liang_voice_context(max_items: int = 8) -> str:
     ])
 
 
-def create_agent(openai_api_key: str, model_id: str = "gpt-5.4-nano", omdb_api_key: str = "", base_url: str = "") -> Agent:
+def create_agent(openai_api_key: str, model_id: str = "liang", omdb_api_key: str = "", base_url: str = "") -> Agent:
     """
     创建影视级镜头分析Agent
     
     Args:
         openai_api_key: OpenAI API密钥
-        model_id: 模型ID，默认为gpt-5.4-nano
+        model_id: 模型ID，默认为liang
         omdb_api_key: OMDb API密钥（可选）
         base_url: API基础URL（可选，用于中转站）
         
@@ -247,6 +248,33 @@ def create_agent(openai_api_key: str, model_id: str = "gpt-5.4-nano", omdb_api_k
     movie_tool = MovieInfoTool(omdb_api_key=omdb_api_key if omdb_api_key else "")
     
     liang_voice_context = _load_liang_voice_context()
+
+    # 构建 RAG 检索器（默认本地句向量；嵌入不可用则自动降级关键词检索）
+    rag = LiAngRAG(
+        embed_provider="local",
+        openai_api_key=openai_api_key,
+        openai_base_url=base_url,
+        embedding_model="text-embedding-3-small",
+    )
+    # HyDE 用的 LLM 调用器：复用当前模型的 chat 能力生成「假设性李安回答」再检索
+    hyde_llm = None
+    if openai_api_key:
+        try:
+            import openai as _openai
+            _hyde_client = _openai.OpenAI(api_key=openai_api_key, base_url=base_url or None)
+
+            def _hyde_call(prompt: str) -> str:
+                resp = _hyde_client.chat.completions.create(
+                    model=model_id,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=120,
+                )
+                return resp.choices[0].message.content or ""
+
+            hyde_llm = _hyde_call
+        except Exception as exc:
+            print(f"[RAG] HyDE LLM 初始化失败，禁用 HyDE：{exc}")
 
     # Agent详细指令 - 体现专业电影镜头分析师角色，同时以李安式思维与书中资料为参照
     instructions = f"""
@@ -369,7 +397,11 @@ def create_agent(openai_api_key: str, model_id: str = "gpt-5.4-nano", omdb_api_k
         add_history_to_context=True,
         num_history_runs=5,
     )
-    
+
+    # 将 RAG 检索器与 HyDE 调用器挂载到 agent，供消息入口在运行时注入检索上下文
+    agent.rag = rag
+    agent.hyde_llm = hyde_llm
+
     return agent
 
 
@@ -413,14 +445,24 @@ app.add_middleware(
 
 
 # In-memory app state
-APP_STATE: Dict[str, Any] = {"agent": None, "configured": False, "last_analysis": None}
+APP_STATE: Dict[str, Any] = {
+    "agent": None,
+    "configured": False,
+    "last_analysis": None,
+    "vision_model": "",
+    "vision_base_url": "",
+    "openai_api_key": "",
+    "base_url": "",
+}
 
 
 class ConfigIn(BaseModel):
     openai_api_key: Optional[str] = None
-    model_id: Optional[str] = "gpt-5.4-nano"
+    model_id: Optional[str] = "liang"
     omdb_api_key: Optional[str] = None
     base_url: Optional[str] = None
+    vision_model: Optional[str] = None
+    vision_base_url: Optional[str] = None
 
 
 class MessageIn(BaseModel):
@@ -433,9 +475,13 @@ def _startup_load_config():
     if cfg.get("openai_api_key"):
         try:
             APP_STATE["agent"] = create_agent(
-                cfg.get("openai_api_key"), cfg.get("model_id", "gpt-5.4-nano"), cfg.get("omdb_api_key", ""), cfg.get("base_url", "")
+                cfg.get("openai_api_key"), cfg.get("model_id", "liang"), cfg.get("omdb_api_key", ""), cfg.get("base_url", "")
             )
             APP_STATE["configured"] = True
+            APP_STATE["openai_api_key"] = cfg.get("openai_api_key", "")
+            APP_STATE["base_url"] = cfg.get("base_url", "")
+            APP_STATE["vision_model"] = cfg.get("vision_model", "")
+            APP_STATE["vision_base_url"] = cfg.get("vision_base_url", "") or cfg.get("base_url", "")
             print("Agent initialized from saved config")
         except Exception as e:
             print("Failed to initialize agent on startup:", e)
@@ -447,18 +493,24 @@ def set_config(cfg: ConfigIn):
     existing = load_config()
     merged = {
         "openai_api_key": incoming.get("openai_api_key") or existing.get("openai_api_key"),
-        "model_id": incoming.get("model_id") or existing.get("model_id", "gpt-5.4-nano"),
+        "model_id": incoming.get("model_id") or existing.get("model_id", "liang"),
         "omdb_api_key": incoming.get("omdb_api_key") or existing.get("omdb_api_key"),
         "base_url": incoming.get("base_url") if incoming.get("base_url") is not None else existing.get("base_url"),
+        "vision_model": incoming.get("vision_model") or existing.get("vision_model", ""),
+        "vision_base_url": incoming.get("vision_base_url") if incoming.get("vision_base_url") is not None else existing.get("vision_base_url", ""),
     }
     if not merged["openai_api_key"]:
         return {"status": "error", "message": "OpenAI API Key is required"}
     save_config(merged)
     try:
         APP_STATE["agent"] = create_agent(
-            merged.get("openai_api_key"), merged.get("model_id", "gpt-5.4-nano"), merged.get("omdb_api_key", ""), merged.get("base_url", "")
+            merged.get("openai_api_key"), merged.get("model_id", "liang"), merged.get("omdb_api_key", ""), merged.get("base_url", "")
         )
         APP_STATE["configured"] = True
+        APP_STATE["openai_api_key"] = merged.get("openai_api_key", "")
+        APP_STATE["base_url"] = merged.get("base_url", "")
+        APP_STATE["vision_model"] = merged.get("vision_model", "")
+        APP_STATE["vision_base_url"] = merged.get("vision_base_url", "") or merged.get("base_url", "")
         return {"status": "ok", "message": "Agent configured"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -473,9 +525,42 @@ def get_config():
         "model_id": cfg.get("model_id"),
         "omdb_api_key": mask_key(cfg.get("omdb_api_key")),
         "base_url": cfg.get("base_url"),
+        "vision_model": cfg.get("vision_model"),
+        "vision_base_url": cfg.get("vision_base_url"),
         "configured": APP_STATE.get("configured", False),
     }
     return masked
+
+
+def _is_movie_search(query: str) -> bool:
+    """判断是否为电影检索意图（C），此类问题应走 OMDb 工具而非李安语料检索。"""
+    keywords = ["找一部电影", "查一下", "有没有一部", "搜索", "帮我找",
+                "是什么电影", "检索", "列出", "导演是谁", "上映", "评分", "imdb"]
+    return any(k in (query or "") for k in keywords)
+
+
+def _build_rag_context(agent, query: str) -> str:
+    """对给定问题做 RAG 检索，返回可注入 prompt 的李安原著参考片段。
+
+    失败或无关时返回空串，绝不阻断主流程；电影检索意图直接跳过。
+    """
+    rag = getattr(agent, "rag", None)
+    if rag is None or not query:
+        return ""
+    if _is_movie_search(query):
+        return ""
+    try:
+        results = rag.retrieve(
+            query,
+            top_k=3,
+            threshold=0.2,
+            use_hyde=True,
+            llm_callable=getattr(agent, "hyde_llm", None),
+        )
+        return LiAngRAG.format_context(results)
+    except Exception as exc:
+        print(f"[RAG] 检索失败，跳过检索上下文：{exc}")
+        return ""
 
 
 @app.post("/api/message")
@@ -483,7 +568,9 @@ def post_message(msg: MessageIn):
     if not APP_STATE.get("configured") or not APP_STATE.get("agent"):
         raise HTTPException(status_code=400, detail="Agent not configured")
     try:
-        resp = APP_STATE["agent"].run(msg.message)
+        rag_ctx = _build_rag_context(APP_STATE["agent"], msg.message)
+        prompt = f"{rag_ctx}\n\n用户问题：{msg.message}" if rag_ctx else msg.message
+        resp = APP_STATE["agent"].run(prompt)
         
         # agno返回的是RunOutput对象，需要提取content字段
         if hasattr(resp, 'content'):
@@ -494,6 +581,42 @@ def post_message(msg: MessageIn):
         return {"status": "ok", "response": response_text}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def caption_image(image_path: str, vision_model: str, vision_base_url: str, api_key: str, user_question: str = "") -> str:
+    """用视觉模型把图片转成客观的文字描述（再交给 liang 用李安口吻输出）。
+
+    两步式图片分析：
+      1) 这里用视觉模型对画面做中性、具体的描述（构图/光线/色彩/人物/空间/情绪）。
+      2) 描述文本由微调后的 liang（纯文本模型）加工成李安风格的输出。
+    """
+    import base64
+    import openai as _openai
+
+    with open(image_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("utf-8")
+
+    client = _openai.OpenAI(api_key=api_key or "not-needed", base_url=vision_base_url or None)
+    prompt = (
+        "请你作为客观的影像观察者，用中文描述这张图片的可见内容。"
+        "要求：1) 只描述画面中确实可见的元素；2) 涵盖构图、光线、色彩、人物/物体、空间关系与情绪氛围；"
+        "3) 不要评价、不要脑补情节、不要猜测出处；4) 控制在 200 字以内。"
+        + (f"\n\n用户额外关注点：{user_question}" if user_question else "")
+    )
+    resp = client.chat.completions.create(
+        model=vision_model,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                ],
+            }
+        ],
+        max_tokens=512,
+    )
+    return (resp.choices[0].message.content or "").strip()
 
 
 @app.post("/api/upload-image")
@@ -504,6 +627,15 @@ def upload_image(
     if not APP_STATE.get("configured") or not APP_STATE.get("agent"):
         raise HTTPException(status_code=400, detail="Agent not configured")
 
+    vision_model = APP_STATE.get("vision_model", "")
+    vision_base_url = APP_STATE.get("vision_base_url", "") or APP_STATE.get("base_url", "")
+    if not vision_model:
+        raise HTTPException(
+            status_code=400,
+            detail="未配置视觉模型（vision_model）。图片分析需要先由视觉模型生成画面描述，"
+                   "再交给 liang 用李安口吻输出。请在配置页填写 vision_model（及其 base_url）。",
+        )
+
     tmp_dir = Path(tempfile.gettempdir()) / "anglee_uploads"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     dst = tmp_dir / file.filename
@@ -511,26 +643,42 @@ def upload_image(
         shutil.copyfileobj(file.file, f)
 
     try:
-        image_obj = create_agno_png_image(str(dst))
-        
-        # 如果用户提供了问题，使用用户的问题，否则使用默认prompt
-        if question and question.strip():
-            prompt = question.strip()
-        else:
-            prompt = "请分析这张电影截图"
-        
-        resp = APP_STATE["agent"].run(prompt, images=[image_obj])
-        
+        # 第一步：视觉模型把图片转成文字描述
+        caption = caption_image(
+            str(dst),
+            vision_model,
+            vision_base_url,
+            APP_STATE.get("openai_api_key", ""),
+            question or "",
+        )
+        if not caption:
+            raise HTTPException(status_code=502, detail="视觉模型未返回有效的画面描述，请检查 vision_model / vision_base_url 配置。")
+
+        # 第二步：用描述文本 + 用户问题 + RAG 语料，交给 liang 用李安口吻输出
+        user_text = question.strip() if question and question.strip() else "请结合这张图片的视觉描述，以李安的口吻分析这张电影截图。"
+        rag_ctx = _build_rag_context(APP_STATE["agent"], f"{user_text}\n{caption}")
+        prompt = (
+            f"{rag_ctx}\n\n"
+            f"用户上传了一张图片。以下是该图片的视觉描述：\n{caption}\n\n"
+            f"{user_text}"
+        ) if rag_ctx else (
+            f"用户上传了一张图片。以下是该图片的视觉描述：\n{caption}\n\n{user_text}"
+        )
+
+        resp = APP_STATE["agent"].run(prompt)
+
         # agno返回的是RunOutput对象，需要提取content字段
         if hasattr(resp, 'content'):
             response_text = resp.content
         else:
             response_text = str(resp)
-        
+
         APP_STATE["last_analysis"] = response_text
         return {"status": "ok", "response": response_text}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"图片分析失败：{e}")
 
 
 @app.get("/api/last-analysis")
@@ -558,4 +706,5 @@ def download_report():
 
 if __name__ == "__main__":
     # 启动 FastAPI 开发服务器（仅供本地调试）
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    # 注意：默认端口改为 7860，避免与 vLLM（默认 8000）冲突
+    uvicorn.run("app:app", host="0.0.0.0", port=7860, reload=True)

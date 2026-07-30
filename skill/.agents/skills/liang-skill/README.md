@@ -4,10 +4,6 @@
 
 适用于电影分场情感曲线、影展阐述、Pitch 情感钩子；**非**片场八卦、非伪造言论。
 
-## 文档
-
-- [`references/research/nuwa-phase1-synthesis.md`](references/research/nuwa-phase1-synthesis.md)  
-- [`SKILL.md`](SKILL.md)
 
 ## 使用示例
 
