@@ -1,10 +1,10 @@
 ### model
-# 基座权重（云上已存在，来自 adapter_config.json 的 base_model_name_or_path）
+# 基座权重
 model_name_or_path: /mnt/workspace/models/models/Qwen--Qwen2.5-7B-Instruct/snapshots/master
-# 你的 LoRA 适配器（云上 checkpoint-40 的路径）
+
 adapter_name_or_path: /home/user/checkpoint-40
-# Qwen2.5 用 qwen2.5；注意不是 qwen3_nothink（那是 Qwen3 才用）
-template: qwen2.5
+
+template: qwen
 trust_remote_code: true
 
 ### export

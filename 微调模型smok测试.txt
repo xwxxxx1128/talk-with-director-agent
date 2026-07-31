@@ -1,0 +1,11 @@
+python -c "
+from modelscope import AutoModelForCausalLM, AutoTokenizer
+import torch
+mid = 'xwxxxx1/qwen2.5-7b-liang-merged'
+tok = AutoTokenizer.from_pretrained(mid)
+model = AutoModelForCausalLM.from_pretrained(mid, dtype=torch.float16, device_map='auto')
+text = tok.apply_chat_template([{'role':'user','content':'你好'}], add_generation_prompt=True, tokenize=False)
+inputs = tok(text, return_tensors='pt').to(model.device)
+out = model.generate(**inputs, max_new_tokens=50)
+print(tok.decode(out[0][inputs.input_ids.shape[1]:], skip_special_tokens=True))
+"

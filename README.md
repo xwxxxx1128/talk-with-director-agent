@@ -6,7 +6,7 @@
 
 > **微调模型**：对话模型基于 **Qwen2.5-7B-Instruct** 使用李安相关语料进行 **LoRA 微调并合并** 得到的真实模型权重。
 > 微调合并后的完整模型已发布至 ModelScope：
-> **https://modelscope.cn/models/xwxxxx1/qwen2.5-7b-liang-merged**
+> **https://www.modelscope.cn/models/xwxxxx1/qwen2.5-7b-liang-merged**
 
 基于 [Agno]的影视镜头 / 文字方案分析 Agent，以**李安的口吻**回答。后端用 FastAPI，前端用 React + Vite + MUI 的企业风格控制台。对话模型为**本地微调后的 `liang` 模型**（Qwen2.5-7B-Instruct + LoRA 合并，经 vLLM 以 OpenAI 兼容接口暴露）。
 

@@ -1,13 +1,19 @@
-fastapi
-uvicorn
-pydantic
-requests
-openai
-sqlalchemy
-Pillow
-python-multipart
-pyyaml
-agno
-numpy
-lancedb
-sentence-transformers
+# 后端核心
+fastapi==0.139.2
+uvicorn==0.51.0
+pydantic==2.13.4
+requests==2.34.2
+openai==2.46.0
+sqlalchemy==2.0.51
+Pillow==12.3.0
+python-multipart==0.0.32
+pyyaml==6.0.3
+agno==2.7.4
+numpy==2.4.6
+lancedb==0.34.0
+
+# 模型与语义检索（云 GPU 机部署实测版本）
+# sentence-transformers：本地 RAG 句向量（BAAI/bge-small-zh-v1.5）
+# vllm：部署 liang 微调模型，提供 OpenAI 兼容接口（--served-model-name liang）
+sentence-transformers==5.6.0
+vllm==0.19.1
